@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="form-token" content="{{FORM_TOKEN}}">
+  <title>CNC event reports</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f2f5fa; color: #17263b; font-family: system-ui, sans-serif; }
+    main { max-width: 860px; margin: 48px auto; padding: 0 20px; }
+    h1 { margin-bottom: 10px; font-size: 2rem; }
+    p { line-height: 1.6; }
+    .intro { color: #526278; margin-bottom: 28px; }
+    .card { background: white; padding: 28px; border: 1px solid #dce4ef; border-radius: 14px; margin-bottom: 24px; }
+    .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+    label { display: block; font-weight: 600; margin-bottom: 8px; }
+    input { width: 100%; padding: 12px; border: 1px solid #aab8cb; border-radius: 6px; font: inherit; }
+    input:focus { outline: 3px solid #bbd9fa; border-color: #196bc0; }
+    button { margin-top: 24px; padding: 12px 22px; background: #155ea9; color: white; border: 0; border-radius: 7px; font: inherit; font-weight: 600; cursor: pointer; }
+    button:disabled { opacity: .65; cursor: wait; }
+    .checkbox { display: flex; align-items: center; gap: 10px; margin: 24px 0 0; font-weight: 500; }
+    .checkbox input { width: 18px; height: 18px; margin: 0; }
+    #status { margin: 16px 0 0; }
+    #status.error { color: #a12323; }
+    h2 { margin-top: 0; font-size: 1.25rem; }
+    pre { white-space: pre-wrap; background: #f2f5fa; padding: 16px; border-radius: 6px; line-height: 1.8; }
+    #report-links { display: grid; gap: 12px; }
+    #report-links a { display: block; padding: 16px; border: 1px solid #c8d9ee; border-radius: 7px; color: #155ea9; font-weight: 600; text-decoration: none; }
+    #report-links a:hover { background: #eff6ff; }
+    .note { color: #526278; font-size: .9rem; }
+    @media (max-width: 580px) { main { margin: 24px auto; } .fields { grid-template-columns: 1fr; } .card { padding: 20px; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>CNC event reports</h1>
+    <p class="intro">Connect to CNC to generate event summaries for each device, the whole network, and the devices with the most events.</p>
+    <form id="connection-form" class="card">
+      <div class="fields">
+        <div><label for="cnc-ip">CNC IP</label><input id="cnc-ip" name="cnc_ip" placeholder="10.10.10.10" required autocomplete="off" spellcheck="false"></div>
+        <div><label for="cw-port">CW_PORT</label><input id="cw-port" name="cw_port" type="number" value="30603" min="1" max="65535" required></div>
+        <div><label for="username">CNC Username</label><input id="username" name="username" required autocomplete="username" spellcheck="false"></div>
+        <div><label for="password">CNC User Password</label><input id="password" name="password" type="password" required autocomplete="current-password"></div>
+      </div>
+      <label class="checkbox" for="hide-generic-events"><input id="hide-generic-events" name="hide_generic_events" type="checkbox">Hide Generic Events in all three reports</label>
+      <button id="generate" type="submit">Generate reports</button>
+      <p id="status" role="status" aria-live="polite"></p>
+    </form>
+    <section id="results" class="card" hidden>
+      <h2>Event statistics</h2>
+      <pre id="statistics"></pre>
+      <h2>HTML reports</h2>
+      <div id="report-links"></div>
+      <p class="note">The three reports exclude CLEARED events. Statistics include all retrieved events; percentages use the total retrieved event count. Counts cover up to 4,000 events returned by CNC.</p>
+    </section>
+  </main>
+  <script>
+    const form = document.getElementById('connection-form');
+    const button = document.getElementById('generate');
+    const status = document.getElementById('status');
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      button.disabled = true;
+      form.setAttribute('aria-busy', 'true');
+      status.className = '';
+      status.textContent = 'Generating reports… This may take up to three minutes.';
+      document.getElementById('results').hidden = true;
+      const connection = Object.fromEntries(new FormData(form).entries());
+      connection.hide_generic_events = document.getElementById('hide-generic-events').checked;
+      try {
+        const response = await fetch('/api/reports', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json', 'X-Form-Token': document.querySelector('meta[name="form-token"]').content},
+          body: JSON.stringify(connection)
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Could not generate reports.');
+        document.getElementById('statistics').textContent = result.statistics.flatMap(
+          line => line.startsWith('Generic Events:') ? [line, '-'.repeat(40)] : [line]
+        ).join('\n');
+        const links = document.getElementById('report-links');
+        links.replaceChildren();
+        for (const report of result.reports) {
+          const link = document.createElement('a');
+          link.href = report.url;
+          link.target = '_blank';
+          link.rel = 'noopener noreferrer';
+          link.textContent = report.title + ' ↗';
+          links.appendChild(link);
+        }
+        document.getElementById('results').hidden = false;
+        status.textContent = 'All three reports are ready.';
+      } catch (error) {
+        status.className = 'error';
+        status.textContent = error.message || 'Could not reach the backend.';
+      } finally {
+        connection.password = '';
+        document.getElementById('password').value = '';
+        button.disabled = false;
+        form.removeAttribute('aria-busy');
+      }
+    });
+  </script>
+</body>
+</html>
